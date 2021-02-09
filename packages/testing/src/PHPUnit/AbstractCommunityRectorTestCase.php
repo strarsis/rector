@@ -5,25 +5,19 @@ declare(strict_types=1);
 namespace Rector\Testing\PHPUnit;
 
 use Iterator;
-use Nette\Utils\Strings;
 use PHPStan\Analyser\NodeScopeResolver;
 use Rector\Core\Application\FileProcessor;
-use Rector\Core\Application\FileSystem\RemovedAndAddedFilesCollector;
 use Rector\Core\Bootstrap\RectorConfigsResolver;
 use Rector\Core\Configuration\Option;
-use Rector\Core\Exception\ShouldNotHappenException;
 use Rector\Core\HttpKernel\RectorKernel;
-use Rector\Core\NonPhpFile\NonPhpFileProcessor;
 use Rector\Core\PhpParser\Printer\BetterStandardPrinter;
 use Rector\Testing\Contract\CommunityRectorTestCaseInterface;
 use Rector\Testing\Guard\FixtureGuard;
-use Rector\Testing\ValueObject\InputFilePathWithExpectedFile;
 use Symplify\EasyTesting\DataProvider\StaticFixtureFinder;
 use Symplify\EasyTesting\StaticFixtureSplitter;
 use Symplify\PackageBuilder\Parameter\ParameterProvider;
 use Symplify\PackageBuilder\Testing\AbstractKernelTestCase;
 use Symplify\SmartFileSystem\SmartFileInfo;
-use Symplify\SmartFileSystem\SmartFileSystem;
 
 abstract class AbstractCommunityRectorTestCase extends AbstractKernelTestCase implements CommunityRectorTestCaseInterface
 {
@@ -33,74 +27,42 @@ abstract class AbstractCommunityRectorTestCase extends AbstractKernelTestCase im
     protected $fileProcessor;
 
     /**
-     * @var SmartFileSystem
-     */
-    protected $smartFileSystem;
-
-    /**
-     * @var NonPhpFileProcessor
-     */
-    protected $nonPhpFileProcessor;
-
-    /**
      * @var ParameterProvider
      */
     protected $parameterProvider;
 
     /**
+     * @var bool
+     */
+    private static $isInitialized = false;
+
+    /**
      * @var FixtureGuard
      */
-    protected $fixtureGuard;
+    private static $fixtureGuard;
 
     /**
-     * @var RemovedAndAddedFilesCollector
+     * @var RectorConfigsResolver
      */
-    protected $removedAndAddedFilesCollector;
-
-    /**
-     * @var SmartFileInfo
-     */
-    protected $originalTempFileInfo;
-
-    /**
-     * @var SmartFileInfo
-     */
-    protected static $allRectorContainer;
-
-    /**
-     * @var BetterStandardPrinter
-     */
-    private $betterStandardPrinter;
+    private static $rectorConfigsResolver;
 
     protected function setUp(): void
     {
-        $this->smartFileSystem = new SmartFileSystem();
-        $this->fixtureGuard = new FixtureGuard();
+        $this->initializeDependencies();
 
         $smartFileInfo = new SmartFileInfo($this->provideConfigFilePath());
-        $configFileInfos = $this->resolveConfigs($smartFileInfo);
+        $configFileInfos = self::$rectorConfigsResolver->resolveFromConfigFileInfo($smartFileInfo);
 
         $this->bootKernelWithConfigs(RectorKernel::class, $configFileInfos);
 
         $this->fileProcessor = $this->getService(FileProcessor::class);
-        $this->nonPhpFileProcessor = $this->getService(NonPhpFileProcessor::class);
         $this->parameterProvider = $this->getService(ParameterProvider::class);
         $this->betterStandardPrinter = $this->getService(BetterStandardPrinter::class);
-        $this->removedAndAddedFilesCollector = $this->getService(RemovedAndAddedFilesCollector::class);
-        $this->removedAndAddedFilesCollector->reset();
     }
 
-    protected function yieldFilesFromDirectory(string $directory, string $suffix = '*.php.inc'): Iterator
+    protected function doTestFileInfo(SmartFileInfo $fixtureFileInfo): void
     {
-        return StaticFixtureFinder::yieldDirectory($directory, $suffix);
-    }
-
-    /**
-     * @param InputFilePathWithExpectedFile[] $extraFiles
-     */
-    protected function doTestFileInfo(SmartFileInfo $fixtureFileInfo, array $extraFiles = []): void
-    {
-        $this->fixtureGuard->ensureFileInfoHasDifferentBeforeAndAfterContent($fixtureFileInfo);
+        self::$fixtureGuard->ensureFileInfoHasDifferentBeforeAndAfterContent($fixtureFileInfo);
 
         $inputFileInfoAndExpectedFileInfo = StaticFixtureSplitter::splitFileInfoToLocalInputAndExpectedFileInfos(
             $fixtureFileInfo
@@ -114,119 +76,40 @@ abstract class AbstractCommunityRectorTestCase extends AbstractKernelTestCase im
         $nodeScopeResolver->setAnalysedFiles([$inputFileInfo->getRealPath()]);
 
         $expectedFileInfo = $inputFileInfoAndExpectedFileInfo->getExpectedFileInfo();
-
-        $this->doTestFileMatchesExpectedContent($inputFileInfo, $expectedFileInfo, $fixtureFileInfo, $extraFiles);
-        $this->originalTempFileInfo = $inputFileInfo;
+        $this->doTestFileMatchesExpectedContent($inputFileInfo, $expectedFileInfo, $fixtureFileInfo);
     }
 
-    protected function getTempPath(): string
+    protected function yieldFilesFromDirectory(string $directory, string $suffix = '*.php.inc'): Iterator
     {
-        return StaticFixtureSplitter::getTemporaryPath();
+        return StaticFixtureFinder::yieldDirectory($directory, $suffix);
     }
 
-    protected function doTestExtraFile(string $expectedExtraFileName, string $expectedExtraContentFilePath): void
-    {
-        $addedFilesWithContents = $this->removedAndAddedFilesCollector->getAddedFilesWithContent();
-        foreach ($addedFilesWithContents as $addedFilesWithContent) {
-            if (! Strings::endsWith($addedFilesWithContent->getFilePath(), $expectedExtraFileName)) {
-                continue;
-            }
-
-            $this->assertStringEqualsFile($expectedExtraContentFilePath, $addedFilesWithContent->getFileContent());
-            return;
-        }
-
-        $addedFilesWithNodes = $this->removedAndAddedFilesCollector->getAddedFilesWithNodes();
-        foreach ($addedFilesWithNodes as $addedFileWithNodes) {
-            if (! Strings::endsWith($addedFileWithNodes->getFilePath(), $expectedExtraFileName)) {
-                continue;
-            }
-
-            $printedFileContent = $this->betterStandardPrinter->prettyPrintFile($addedFileWithNodes->getNodes());
-            $this->assertStringEqualsFile($expectedExtraContentFilePath, $printedFileContent);
-            return;
-        }
-
-        $movedFilesWithContent = $this->removedAndAddedFilesCollector->getMovedFileWithContent();
-        foreach ($movedFilesWithContent as $movedFileWithContent) {
-            if (! Strings::endsWith($movedFileWithContent->getNewPathname(), $expectedExtraFileName)) {
-                continue;
-            }
-
-            $this->assertStringEqualsFile($expectedExtraContentFilePath, $movedFileWithContent->getFileContent());
-            return;
-        }
-
-        throw new ShouldNotHappenException();
-    }
-
-    protected function getFixtureTempDirectory(): string
-    {
-        return sys_get_temp_dir() . '/_temp_fixture_rector_tests';
-    }
-
-    /**
-     * @return SmartFileInfo[]
-     */
-    private function resolveConfigs(SmartFileInfo $configFileInfo): array
-    {
-        $configFileInfos = [$configFileInfo];
-
-        $rectorConfigsResolver = new RectorConfigsResolver();
-        $setFileInfos = $rectorConfigsResolver->resolveSetFileInfosFromConfigFileInfos($configFileInfos);
-
-        return array_merge($configFileInfos, $setFileInfos);
-    }
-
-    /**
-     * @param InputFilePathWithExpectedFile[] $extraFiles
-     */
     private function doTestFileMatchesExpectedContent(
         SmartFileInfo $originalFileInfo,
         SmartFileInfo $expectedFileInfo,
-        SmartFileInfo $fixtureFileInfo,
-        array $extraFiles = []
+        SmartFileInfo $fixtureFileInfo
     ): void {
         $this->parameterProvider->changeParameter(Option::SOURCE, [$originalFileInfo->getRealPath()]);
 
-        if (! Strings::endsWith($originalFileInfo->getFilename(), '.blade.php') && in_array(
-            $originalFileInfo->getSuffix(),
-            ['php', 'phpt'],
-            true
-        )) {
-            if ($extraFiles === []) {
-                $this->fileProcessor->parseFileInfoToLocalCache($originalFileInfo);
-                $this->fileProcessor->refactor($originalFileInfo);
-                $this->fileProcessor->postFileRefactor($originalFileInfo);
-            } else {
-                $fileInfosToProcess = [$originalFileInfo];
+        $this->fileProcessor->parseFileInfoToLocalCache($originalFileInfo);
+        $this->fileProcessor->refactor($originalFileInfo);
+        $this->fileProcessor->postFileRefactor($originalFileInfo);
 
-                foreach ($extraFiles as $extraFile) {
-                    $fileInfosToProcess[] = $extraFile->getInputFileInfo();
-                }
-
-                // life-cycle trio :)
-                foreach ($fileInfosToProcess as $fileInfoToProcess) {
-                    $this->fileProcessor->parseFileInfoToLocalCache($fileInfoToProcess);
-                }
-
-                foreach ($fileInfosToProcess as $fileInfoToProcess) {
-                    $this->fileProcessor->refactor($fileInfoToProcess);
-                }
-
-                foreach ($fileInfosToProcess as $fileInfoToProcess) {
-                    $this->fileProcessor->postFileRefactor($fileInfoToProcess);
-                }
-            }
-
-            // mimic post-rectors
-            $changedContent = $this->fileProcessor->printToString($originalFileInfo);
-        } else {
-            $message = sprintf('Suffix "%s" is not supported yet', $originalFileInfo->getSuffix());
-            throw new ShouldNotHappenException($message);
-        }
-
+        // mimic post-rectors
+        $changedContent = $this->fileProcessor->printToString($originalFileInfo);
         $relativeFilePathFromCwd = $fixtureFileInfo->getRelativeFilePathFromCwd();
         $this->assertStringEqualsFile($expectedFileInfo->getRealPath(), $changedContent, $relativeFilePathFromCwd);
+    }
+
+    private function initializeDependencies(): void
+    {
+        if (self::$isInitialized) {
+            return;
+        }
+
+        self::$fixtureGuard = new FixtureGuard();
+        self::$rectorConfigsResolver = new RectorConfigsResolver();
+
+        self::$isInitialized = true;
     }
 }
