@@ -135,24 +135,6 @@ final class RectorNodeTraverser extends NodeTraverser
         return count($zeroCacheRectors);
     }
 
-    /**
-     * Mostly used for testing
-     */
-    private function activateEnabledRectorOnly(): void
-    {
-        $this->visitors = [];
-
-        $enabledRector = $this->enabledRectorProvider->getEnabledRector();
-        foreach ($this->allPhpRectors as $phpRector) {
-            if (! is_a($phpRector, $enabledRector, true)) {
-                continue;
-            }
-
-            $this->addVisitor($phpRector);
-            break;
-        }
-    }
-
     private function hasFileNodeRectorsEnabled(): bool
     {
         foreach ($this->visitors as $visitor) {
