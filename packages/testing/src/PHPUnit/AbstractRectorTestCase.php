@@ -20,12 +20,8 @@ use Rector\Core\NonPhpFile\NonPhpFileProcessor;
 use Rector\Core\PhpParser\Printer\BetterStandardPrinter;
 use Rector\Core\Stubs\StubLoader;
 use Rector\Core\ValueObject\StaticNonPhpFileSuffixes;
-<<<<<<< HEAD
 use Rector\Testing\Application\EnabledRectorProvider;
-=======
-use Rector\Testing\Application\EnabledRectorsProvider;
 use Rector\Testing\Configuration\AllRectorConfigFactory;
->>>>>>> 47c6a521f... [Tests] Split main test case and community test case
 use Rector\Testing\Contract\RunnableInterface;
 use Rector\Testing\Guard\FixtureGuard;
 use Rector\Testing\PHPUnit\Behavior\MovingFilesTrait;
@@ -116,27 +112,16 @@ abstract class AbstractRectorTestCase extends AbstractKernelTestCase
 
             $this->bootKernelWithConfigsAndStaticCache(RectorKernel::class, $configFileInfos);
 
-<<<<<<< HEAD
             /** @var EnabledRectorProvider $enabledRectorsProvider */
             $enabledRectorsProvider = $this->getService(EnabledRectorProvider::class);
-=======
-            /** @var EnabledRectorsProvider $enabledRectorsProvider */
-            $enabledRectorsProvider = $this->getService(EnabledRectorsProvider::class);
->>>>>>> 47c6a521f... [Tests] Split main test case and community test case
             $enabledRectorsProvider->reset();
         } else {
             // prepare container with all rectors
             // cache only rector tests - defined in phpunit.xml
             $this->createRectorRepositoryContainer();
 
-<<<<<<< HEAD
             /** @var EnabledRectorProvider $enabledRectorsProvider */
             $enabledRectorsProvider = $this->getService(EnabledRectorProvider::class);
-=======
-            /** @var EnabledRectorsProvider $enabledRectorsProvider */
-            $enabledRectorsProvider = $this->getService(EnabledRectorsProvider::class);
-            $enabledRectorsProvider->reset();
->>>>>>> 47c6a521f... [Tests] Split main test case and community test case
             $enabledRectorsProvider->setEnabledRector($this->getRectorClass());
         }
 
@@ -268,14 +253,10 @@ abstract class AbstractRectorTestCase extends AbstractKernelTestCase
     private function createRectorRepositoryContainer(): void
     {
         if (self::$allRectorContainer === null) {
-<<<<<<< HEAD
-            $this->createContainerWithAllRectors();
-=======
             $allRectorConfigFactory = new AllRectorConfigFactory();
             $configFilePath = $allRectorConfigFactory->create();
             $this->bootKernelWithConfigs(RectorKernel::class, [$configFilePath]);
 
->>>>>>> 47c6a521f... [Tests] Split main test case and community test case
             self::$allRectorContainer = self::$container;
             return;
         }
